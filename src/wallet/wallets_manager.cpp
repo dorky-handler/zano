@@ -152,7 +152,7 @@ bool wallets_manager::do_exception_safe_call(guarded_code_t guarded_code, error_
 }
 
 
-bool wallets_manager::init_command_line(int argc, char* argv[])
+bool wallets_manager::init_command_line(int argc, char* argv[], std::string& fail_message)
 {
   TRY_ENTRY();
   po::options_description desc_cmd_only("Command line options");
@@ -183,6 +183,8 @@ bool wallets_manager::init_command_line(int argc, char* argv[])
   command_line::add_arg(desc_cmd_sett, command_line::arg_force_predownload);
   command_line::add_arg(desc_cmd_sett, command_line::arg_validate_predownload);
   command_line::add_arg(desc_cmd_sett, command_line::arg_predownload_link);
+  command_line::add_arg(desc_cmd_sett, command_line::arg_deeplink);
+  command_line::add_arg(desc_cmd_sett, command_line::arg_disable_ntp);
 
 
 #ifndef MOBILE_WALLET_BUILD
@@ -197,9 +199,8 @@ bool wallets_manager::init_command_line(int argc, char* argv[])
   po::options_description desc_options("Allowed options");
   desc_options.add(desc_cmd_only).add(desc_cmd_sett);
 
-
-  
-  bool coomand_line_parsed = command_line::handle_error_helper(desc_options, [&]()
+  std::string err_str;
+  bool command_line_parsed = command_line::handle_error_helper(desc_options, err_str, [&]()
   {
     po::store(po::parse_command_line(argc, argv, desc_options), m_vm);
 
@@ -230,13 +231,19 @@ bool wallets_manager::init_command_line(int argc, char* argv[])
     return true;
   });
 
-  if (!coomand_line_parsed)
+  if (!command_line_parsed)
   {
     std::stringstream ss;
     ss << "Command line has wrong arguments: " << std::endl;
     for (int i = 0; i != argc; i++)
       ss << "[" << i << "] " << argv[i] << std::endl;
     std::cerr << ss.str() << std::endl << std::flush;
+
+    fail_message = "Error parsing arguments.\n";
+    fail_message += err_str + "\n";
+    std::stringstream s;
+    desc_options.print(s);
+    fail_message += s.str();
     return false;
   }
 
@@ -246,6 +253,7 @@ bool wallets_manager::init_command_line(int argc, char* argv[])
   return true;
   CATCH_ENTRY2(false);
 }
+
 
 void terminate_handler_func()
 {
@@ -798,6 +806,24 @@ std::string wallets_manager::get_tx_pool_info(currency::COMMAND_RPC_GET_POOL_INF
 }
 
 
+std::string wallets_manager::export_wallet_history(const view::export_wallet_info& ewi)
+{
+  GET_WALLET_OPT_BY_ID(ewi.wallet_id, wo);
+  try {
+
+    boost::filesystem::ofstream fstream;
+    fstream.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+    fstream.open(ewi.path, std::ios_base::binary | std::ios_base::out | std::ios_base::trunc);
+    wo.w->get()->export_transaction_history(fstream, ewi.format, ewi.include_pos_transactions);
+    fstream.close();
+  }
+  catch (...)
+  {
+    return API_RETURN_CODE_FAIL;
+  }
+  return API_RETURN_CODE_OK;
+}
+
 uint64_t wallets_manager::get_default_fee()
 {
   return TX_DEFAULT_FEE;
@@ -963,6 +989,11 @@ bool wallets_manager::get_opened_wallets(std::list<view::open_wallet_response>& 
     get_wallet_info(w.second, owr.wi);
   }
   return true;
+}
+
+const po::variables_map& wallets_manager::get_arguments()
+{
+  return m_vm;
 }
 
 std::string wallets_manager::get_recent_transfers(size_t wallet_id, uint64_t offset, uint64_t count, view::transfers_array& tr_hist, bool exclude_mining_txs)
@@ -1350,6 +1381,7 @@ std::string wallets_manager::transfer(size_t wallet_id, const view::transfer_par
       sa.body = d.address;
       extra.push_back(sa);
 
+
       currency::account_public_address acc = AUTO_VAL_INIT(acc);
       currency::get_account_address_from_str(acc, BC_WRAP_SERVICE_CUSTODY_WALLET);
       de.addr.front() = acc;
@@ -1404,7 +1436,7 @@ std::string wallets_manager::transfer(size_t wallet_id, const view::transfer_par
     tc.comment = tp.comment;
     extra.push_back(tc);
   }
-  if (tp.push_payer)
+  if (tp.push_payer && !wrap)
   {
     currency::create_and_add_tx_payer_to_container_from_address(extra, w->get()->get_account().get_keys().account_address,  w->get()->get_top_block_height(),  w->get()->get_core_runtime_config());
   }    
@@ -1801,7 +1833,10 @@ void wallets_manager::on_transfer2(size_t wallet_id, const tools::wallet_public:
 
   GET_WALLET_OPTIONS_BY_ID_VOID_RET(wallet_id, w);
   tei.is_wallet_in_sync_process = w.long_refresh_in_progress;
-  m_pview->money_transfer(tei);
+  if (!(w.w->get()->is_watch_only()))
+  {
+    m_pview->money_transfer(tei);
+  }
 }
 void wallets_manager::on_pos_block_found(size_t wallet_id, const currency::block& b)
 {

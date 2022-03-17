@@ -151,7 +151,7 @@ namespace command_line
   }
 
   template<typename F>
-  bool handle_error_helper(const boost::program_options::options_description& desc, F parser)
+  bool handle_error_helper(const boost::program_options::options_description& desc, std::string& err, F parser)
   {
     try
     {
@@ -159,6 +159,7 @@ namespace command_line
     }
     catch (std::exception& e)
     {
+      err = e.what();
       std::cerr << "Failed to parse arguments: " << e.what() << std::endl;
       std::cerr << desc << std::endl;
       return false;
@@ -169,6 +170,13 @@ namespace command_line
       std::cerr << desc << std::endl;
       return false;
     }
+  }
+
+  template<typename F>
+  bool handle_error_helper(const boost::program_options::options_description& desc, F parser)
+  {
+    std::string stub_err;
+    return handle_error_helper(desc, stub_err, parser);
   }
 
   template<typename T, bool required>
@@ -208,6 +216,7 @@ namespace command_line
   extern const arg_descriptor<bool>        arg_show_details;
   extern const arg_descriptor<bool>        arg_show_rpc_autodoc;
   extern const arg_descriptor<bool>        arg_disable_upnp;
+  extern const arg_descriptor<bool>        arg_disable_ntp;
   extern const arg_descriptor<bool>        arg_disable_stop_if_time_out_of_sync;
   extern const arg_descriptor<bool>        arg_disable_stop_on_low_free_space;
   extern const arg_descriptor<bool>        arg_enable_offers_service;
@@ -216,4 +225,5 @@ namespace command_line
   extern const arg_descriptor<bool>        arg_force_predownload;
   extern const arg_descriptor<bool>        arg_validate_predownload;
   extern const arg_descriptor<std::string> arg_predownload_link;
+  extern const arg_descriptor<std::string> arg_deeplink;
 }

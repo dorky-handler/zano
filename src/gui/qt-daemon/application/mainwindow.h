@@ -4,10 +4,14 @@
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#pragma once
 #include <QtWidgets>
 #include <QWebChannel>
+#include <boost/interprocess/ipc/message_queue.hpp>
 
 #include "wallet/view_iface.h"
+#include "serialization/keyvalue_helper_structs.h"
+
 
 #ifndef Q_MOC_RUN
 #include "wallet/wallets_manager.h"
@@ -57,13 +61,24 @@ public:
   bool init_backend(int argc, char* argv[]);
   bool show_inital();
   void show_notification(const std::string& title, const std::string& message);
+  bool handle_ipc_event(const std::string& arguments);
 
   struct app_config
   {
-    std::pair<int64_t, int64_t> m_window_position;
-    std::pair<int64_t, int64_t> m_window_size;
+    
+    epee::kvserializable_pair<int64_t, int64_t> m_window_position;
+    epee::kvserializable_pair<int64_t, int64_t> m_window_size;
     bool is_maximazed;
     bool is_showed;
+    bool disable_notifications;
+
+    BEGIN_KV_SERIALIZE_MAP()
+      KV_SERIALIZE(m_window_position)
+      KV_SERIALIZE(m_window_size)
+      KV_SERIALIZE(is_maximazed)
+      KV_SERIALIZE(is_showed)
+      KV_SERIALIZE(disable_notifications)
+    END_KV_SERIALIZE_MAP()
   };
 
   protected slots:
@@ -150,6 +165,10 @@ public:
   QString get_default_fee();
   QString get_options();  
   void    bool_toggle_icon(const QString& param);
+  
+  bool    get_is_disabled_notifications();
+  bool    set_is_disabled_notifications(const bool& param);
+  QString export_wallet_history(const QString& param);
   QString get_log_file();
   QString check_available_sources(const QString& param);
   QString open_url_in_browser(const QString& param);
@@ -176,6 +195,8 @@ signals:
   void do_dispatch(const QString status, const QString params);  //general function
   void on_core_event(const QString method_name);  //general function
   void set_options(const QString str);  //general function
+  void get_wallet_name();
+  void handle_deeplink_click(const QString str);
 
 private:
   //--------------------  i_core_event_handler --------------------
@@ -204,7 +225,7 @@ private:
   void contextMenuEvent(QContextMenuEvent * event);
   void changeEvent(QEvent *e);
   void on_maximized();
-
+  bool handle_deeplink_params_in_commandline();
   //void setOrientation(Qt::ScreenOrientation orientation);
   
   
@@ -218,6 +239,9 @@ private:
   bool store_app_config();
   bool load_app_config();
   bool init_window();
+  bool init_ipc_server();
+  bool remove_ipc();
+  
 
   std::string get_wallet_log_prefix(size_t wallet_id) const { return m_backend.get_wallet_log_prefix(wallet_id); }
 
@@ -240,6 +264,7 @@ private:
   app_config m_config;
 
   epee::locked_object<std::map<uint64_t, uint64_t>> m_wallet_states;
+  std::thread m_ipc_worker;
   struct events_que_struct
   {
     std::list<currency::core_event> m_que;
@@ -254,7 +279,7 @@ private:
 
   enum localization_string_indices
   {
-    // order is surprizingly important here! (see also updateLocalisation in AppController.js)
+    // order is surprisingly important here! (see also updateLocalisation in AppController.js)
     localization_id_quit = 0, 
     localization_id_is_received,
     localization_id_is_confirmed, 
